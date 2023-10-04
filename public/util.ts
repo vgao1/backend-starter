@@ -77,6 +77,51 @@ const operations: operation[] = [
     method: "DELETE",
     fields: { id: "input" },
   },
+  {
+    name: "Favorite Post",
+    endpoint: "/api/favorites",
+    method: "POST",
+    fields: { post: "input"}
+  },
+  { name: "Unfavorite Post",
+    endpoint: "/api/favorites/:id",
+    method: "DELETE",
+    fields: { favorite: "input"}
+  },
+  {
+    name: "Get Favorites (empty for all)",
+    endpoint: "/api/favorites",
+    method: "GET",
+    fields: { liker: "input" },
+  },
+  {
+    name: "Post Reaction",
+    endpoint: "/api/reactions",
+    method: "POST",
+    fields: { 
+      post: "input",
+      content: "input",
+      reactionType: "input"
+    }
+  },
+  { 
+    name: "Delete Reaction",
+    endpoint: "/api/reactions/:id",
+    method: "DELETE",
+    fields: { reaction: "input"}
+  },
+  {
+    name: "Find Similar Posts",
+    endpoint: "/api/reactions",
+    method: "GET",
+    fields: { reaction: "input"}
+  },
+  {
+    name: "Upvote",
+    endpoint: "/api/reactions/upvote",
+    method: "POST",
+    fields: { reaction: "input"}
+  }
 ];
 
 // Do not edit below here.

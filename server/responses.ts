@@ -1,4 +1,5 @@
 import { User } from "./app";
+import { FavoriteDoc } from "./concepts/favorite";
 import { AlreadyFriendsError, FriendNotFoundError, FriendRequestAlreadyExistsError, FriendRequestDoc, FriendRequestNotFoundError } from "./concepts/friend";
 import { PostAuthorNotMatchError, PostDoc } from "./concepts/post";
 import { Router } from "./framework/router";
@@ -25,6 +26,14 @@ export default class Responses {
   static async posts(posts: PostDoc[]) {
     const authors = await User.idsToUsernames(posts.map((post) => post.author));
     return posts.map((post, i) => ({ ...post, author: authors[i] }));
+  }
+
+  /**
+   * Same as {@link favorite} but for an array of FavoriteDoc for improved performance.
+   */
+  static async favorites(favorites: FavoriteDoc[]) {
+    const likers = await User.idsToUsernames(favorites.map((favorite) => favorite.liker));
+    return favorites.map((favorite, i) => ({ ...favorite, liker: likers[i] }));
   }
 
   /**

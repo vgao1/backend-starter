@@ -2,7 +2,7 @@ import { ObjectId } from "mongodb";
 
 import { Router, getExpressRouter } from "./framework/router";
 
-import { Friend, Post, User, WebSession } from "./app";
+import { Favorite, Friend, Post, Reaction, User, WebSession } from "./app";
 import { PostDoc, PostOptions } from "./concepts/post";
 import { UserDoc } from "./concepts/user";
 import { WebSessionDoc } from "./concepts/websession";
@@ -71,6 +71,8 @@ class Routes {
 
   @Router.post("/posts")
   async createPost(session: WebSessionDoc, content: string, options?: PostOptions) {
+    // createPost(session: WebSessionDoc, photo: string, zipCode: string, address: string)
+    // where photo can be a link to a photo
     const user = WebSession.getUser(session);
     const created = await Post.create(user, content, options);
     return { msg: created.msg, post: await Responses.post(created.post) };
@@ -78,6 +80,8 @@ class Routes {
 
   @Router.patch("/posts/:_id")
   async updatePost(session: WebSessionDoc, _id: ObjectId, update: Partial<PostDoc>) {
+    // will need to update "Update Post" object in util.ts so that 
+    // update contains fields for photo, zipCode, and address
     const user = WebSession.getUser(session);
     await Post.isAuthor(user, _id);
     return await Post.update(_id, update);
@@ -135,6 +139,101 @@ class Routes {
     const user = WebSession.getUser(session);
     const fromId = (await User.getUserByUsername(from))._id;
     return await Friend.rejectRequest(fromId, user);
+  }
+
+  @Router.post("/favorites")
+  async favoritePost(session: WebSessionDoc, post: string) {
+    const user = WebSession.getUser(session);
+    const postId = new ObjectId(post);
+    return await Favorite.favorite(user, postId);
+  }
+
+  @Router.delete("/favorites/:_id")
+  async unfavoritePost(favorite: string) {
+    return Favorite.unfavorite(favorite);
+  }
+
+  @Router.get("/favorites")
+  async getFavorites(liker: string) {
+    let favorites;
+    if (liker) {
+      const id = (await User.getUserByUsername(liker))._id;
+      favorites = await Favorite.getByLiker(id);
+    } else {
+      favorites = await Favorite.getFavorites({});
+    }
+    return Responses.favorites(favorites);
+  }
+
+  @Router.post("/reactions")
+  async postReaction(session: WebSessionDoc, post: string, content: string, reactionType: string) {
+    const user = WebSession.getUser(session);
+    const numVotes = (reactionType=="comment") ? 0 : 1;
+    const postId = new ObjectId(post);
+    console.log(postId);
+    return await Reaction.postReaction(content, postId, user, numVotes, reactionType)
+  }
+
+  @Router.delete("/reactions/:_id")
+  async deleteReaction(reaction: string) {
+    return await Reaction.deleteReaction(reaction);
+  }
+
+  @Router.post("/reactions/upvote")
+  async upvoteTag(reaction: string) {
+    return await Reaction.upvote(reaction);
+  }
+
+  @Router.get("/reactions")
+  async findSimilarPosts(reaction: string) {
+    return await Reaction.findSimilarPosts(reaction);
+  }
+
+  @Router.post("/map/start_address")
+  async addStartingAddress(startAddress: string, zipCode: string) {
+    // Adds the address of a starting address (of a public location) to map displayed for zipCode
+  }
+
+  @Router.post("/map/destination_address")
+  async addDestinationAddress(destinationAddress: string, zipCode: string) {
+    // Adds the address of a destination address to map displayed for zipCode
+  }
+
+  @Router.delete("/map/start_address/:id")
+  async removeStartingAddress(startAddress: string) {
+    // Adds the address of a starting address (of a public location)
+  }
+
+  @Router.delete("/map/destination_address/:id")
+  async removeDestinationAddress(destinationAddress: string, zipCode: string) {
+    // Adds the address of a destination address to map displayed for zipCode
+  }
+
+  @Router.get("/map/starting_address")
+  async getStartingAddress(zipCode: String) {
+    // Gets all the starting addresses associated with zipCode
+  }
+
+  @Router.get("/map/destination_address")
+  async getDestinationAddress(zipCode: String) {
+    // Gets all the destination addresses associated with zipCode
+  }
+
+  @Router.get("/map/findRoute")
+  async findRoute(zipCode: string, startingAddress: string, destinationAddress: string, transportationMode: string) {
+    // Generate URL to Google Maps showing route from startingAddress to destinationAddress using transportationMode
+  }
+
+  @Router.post("/report")
+  async uploadReport(session: WebSessionDoc, post: string, content: string, item: string) {
+    // called when user submits a report to report item for being inappropriate. post is the post item is under
+    // if item is a comment/tag or the post that is reported is item is a post
+  }
+
+  @Router.post("/voteToRemove") 
+  async voteRemove(session: WebSessionDoc, post: string, item: string) {
+    // called when a moderator votes to remove an item that was reported to be inappropriate. post 
+    // is the post item is under if item is a comment/tag or the post that is reported if item is a post.
   }
 }
 

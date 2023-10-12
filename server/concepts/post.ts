@@ -4,20 +4,21 @@ import DocCollection, { BaseDoc } from "../framework/doc";
 import { NotAllowedError, NotFoundError } from "./errors";
 
 export interface PostOptions {
-  backgroundColor?: string;
+  address?: string;
 }
 
 export interface PostDoc extends BaseDoc {
   author: ObjectId;
-  content: string;
+  photoURL: string;
+  zipCode: string;
   options?: PostOptions;
 }
 
 export default class PostConcept {
   public readonly posts = new DocCollection<PostDoc>("posts");
 
-  async create(author: ObjectId, content: string, options?: PostOptions) {
-    const _id = await this.posts.createOne({ author, content, options });
+  async create(author: ObjectId, photoURL: string, zipCode: string, options?: PostOptions) {
+    const _id = await this.posts.createOne({ author, photoURL, zipCode, options });
     return { msg: "Post successfully created!", post: await this.posts.readOne({ _id }) };
   }
 
@@ -26,6 +27,11 @@ export default class PostConcept {
       sort: { dateUpdated: -1 },
     });
     return posts;
+  }
+
+  async getPost(_id: ObjectId) {
+    const post = await this.posts.readOne({_id});
+    return post;
   }
 
   async getByAuthor(author: ObjectId) {
@@ -55,7 +61,7 @@ export default class PostConcept {
 
   private sanitizeUpdate(update: Partial<PostDoc>) {
     // Make sure the update cannot change the author.
-    const allowedUpdates = ["content", "options"];
+    const allowedUpdates = ["photoURL", "zipCode", "options"];
     for (const key in update) {
       if (!allowedUpdates.includes(key)) {
         throw new NotAllowedError(`Cannot update '${key}' field!`);

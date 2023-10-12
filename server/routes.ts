@@ -2,8 +2,10 @@ import { ObjectId } from "mongodb";
 
 import { Router, getExpressRouter } from "./framework/router";
 
-import { Favorite, Friend, Post, Reaction, User, WebSession } from "./app";
+import { Favorite, Moderation, Post, Reaction, User, WebSession, ZipCodeMap } from "./app";
+import { NotAllowedError, NotFoundError } from "./concepts/errors";
 import { PostDoc, PostOptions } from "./concepts/post";
+import { CantDeleteReactionError, ReactionNotFoundError } from "./concepts/reaction";
 import { UserDoc } from "./concepts/user";
 import { WebSessionDoc } from "./concepts/websession";
 import Responses from "./responses";
@@ -70,170 +72,247 @@ class Routes {
   }
 
   @Router.post("/posts")
-  async createPost(session: WebSessionDoc, content: string, options?: PostOptions) {
+  async createPost(session: WebSessionDoc, photoURL: string, zipCode: string, options?: PostOptions) {
     // createPost(session: WebSessionDoc, photo: string, zipCode: string, address: string)
     // where photo can be a link to a photo
     const user = WebSession.getUser(session);
-    const created = await Post.create(user, content, options);
-    return { msg: created.msg, post: await Responses.post(created.post) };
+    ZipCodeMap.isValidZipCode(zipCode);
+    const created = await Post.create(user, photoURL, zipCode, options);
+    let creationMsg = created.msg;
+    let mapObj;
+    if (options?.address) {
+      const mapCreated = await ZipCodeMap.addAddress(user, zipCode, options.address, "destination");
+      creationMsg+="\n Successfully added destination "+options.address+"!";
+      mapObj = mapCreated.map;
+    } else {
+      mapObj = {msg:"No update to map for zip code "+zipCode};
+    }
+    return { msg: creationMsg, post: await Responses.post(created.post), map: mapObj};
   }
 
   @Router.patch("/posts/:_id")
   async updatePost(session: WebSessionDoc, _id: ObjectId, update: Partial<PostDoc>) {
-    // will need to update "Update Post" object in util.ts so that 
-    // update contains fields for photo, zipCode, and address
     const user = WebSession.getUser(session);
     await Post.isAuthor(user, _id);
-    return await Post.update(_id, update);
+    const postObj = (await Post.getPost(_id));
+    let msgValue = "";
+    if (postObj) {
+      const zipCodeChanged = (update.zipCode && update.zipCode!==postObj.zipCode);
+      if (postObj.options?.address && (update.options?.address || zipCodeChanged)) {
+        if (zipCodeChanged) {
+          Post.update(_id, {options: undefined});
+        }
+        ZipCodeMap.removeAddress(user, postObj.zipCode, postObj.options.address, "destination");
+        msgValue+="Successfully removed destination "+postObj.options.address+"!<br>";
+      }
+      if (update.options?.address) {
+        const zipCode = (update.zipCode) ? update.zipCode : postObj.zipCode;
+        ZipCodeMap.addAddress(user, zipCode, update.options.address, "destination");
+        msgValue+="Successfully added destination "+update.options.address+"!";
+      }
+    }
+    const postUpdate = await Post.update(_id, update);
+    msgValue = postUpdate.msg+"<br>"+msgValue;
+    return {msg: msgValue};
   }
 
   @Router.delete("/posts/:_id")
   async deletePost(session: WebSessionDoc, _id: ObjectId) {
     const user = WebSession.getUser(session);
     await Post.isAuthor(user, _id);
-    return Post.delete(_id);
-  }
-
-  @Router.get("/friends")
-  async getFriends(session: WebSessionDoc) {
-    const user = WebSession.getUser(session);
-    return await User.idsToUsernames(await Friend.getFriends(user));
-  }
-
-  @Router.delete("/friends/:friend")
-  async removeFriend(session: WebSessionDoc, friend: string) {
-    const user = WebSession.getUser(session);
-    const friendId = (await User.getUserByUsername(friend))._id;
-    return await Friend.removeFriend(user, friendId);
-  }
-
-  @Router.get("/friend/requests")
-  async getRequests(session: WebSessionDoc) {
-    const user = WebSession.getUser(session);
-    return await Responses.friendRequests(await Friend.getRequests(user));
-  }
-
-  @Router.post("/friend/requests/:to")
-  async sendFriendRequest(session: WebSessionDoc, to: string) {
-    const user = WebSession.getUser(session);
-    const toId = (await User.getUserByUsername(to))._id;
-    return await Friend.sendRequest(user, toId);
-  }
-
-  @Router.delete("/friend/requests/:to")
-  async removeFriendRequest(session: WebSessionDoc, to: string) {
-    const user = WebSession.getUser(session);
-    const toId = (await User.getUserByUsername(to))._id;
-    return await Friend.removeRequest(user, toId);
-  }
-
-  @Router.put("/friend/accept/:from")
-  async acceptFriendRequest(session: WebSessionDoc, from: string) {
-    const user = WebSession.getUser(session);
-    const fromId = (await User.getUserByUsername(from))._id;
-    return await Friend.acceptRequest(fromId, user);
-  }
-
-  @Router.put("/friend/reject/:from")
-  async rejectFriendRequest(session: WebSessionDoc, from: string) {
-    const user = WebSession.getUser(session);
-    const fromId = (await User.getUserByUsername(from))._id;
-    return await Friend.rejectRequest(fromId, user);
+    const postObj = await Post.getPost(_id);
+    let msgValue = "";
+    if (postObj) {
+      if (postObj.options?.address) {
+        ZipCodeMap.removeAddress(user, postObj.zipCode, postObj.options.address, "destination");
+        msgValue+="Successfully removed destination "+postObj.options.address+"!";
+      }
+      await Moderation.deleteAllReportsByPost(postObj._id);
+      await Reaction.deleteAllReactions(postObj._id);
+      await Favorite.unfavoriteAll(postObj._id);
+    }
+    const postDeletion = await Post.delete(_id);
+    msgValue = postDeletion.msg+"<br>"+msgValue;
+    return {msg: msgValue};
   }
 
   @Router.post("/favorites")
-  async favoritePost(session: WebSessionDoc, post: string) {
+  async favoriteItem(session: WebSessionDoc, item: string, itemType: string) {
     const user = WebSession.getUser(session);
-    const postId = new ObjectId(post);
-    return await Favorite.favorite(user, postId);
+    const _id = new ObjectId(item); 
+    if (itemType==="post") {
+      const postObjs = await Post.getPosts({ _id });
+      if (postObjs.length == 0) {
+        throw new NotFoundError("Post with ID "+item+" not found!");
+      }
+    } else if (itemType==="user") {
+      const userObj = await User.getUserById(_id);
+      if (!userObj) {
+        throw new NotFoundError("User not found!");
+      } else if (userObj._id.toString() === user.toString()) {
+        throw new NotAllowedError("Can't favorite yourself!");
+      }
+    } else {
+      throw new NotAllowedError("itemType's value should be 'post' or 'user'");
+    }
+    return await Favorite.favorite(user, _id, itemType);
   }
 
   @Router.delete("/favorites/:_id")
-  async unfavoritePost(favorite: string) {
+  async unfavoritePost(session: WebSessionDoc, favorite: string) {
+    const user = WebSession.getUser(session);
+    await Favorite.isLiker(user, favorite);
     return Favorite.unfavorite(favorite);
   }
 
   @Router.get("/favorites")
-  async getFavorites(liker: string) {
-    let favorites;
-    if (liker) {
-      const id = (await User.getUserByUsername(liker))._id;
-      favorites = await Favorite.getByLiker(id);
-    } else {
-      favorites = await Favorite.getFavorites({});
-    }
+  async getFavorites(session: WebSessionDoc) {
+    const user = WebSession.getUser(session);
+    const favorites = await Favorite.getByLiker(user);
     return Responses.favorites(favorites);
   }
 
   @Router.post("/reactions")
   async postReaction(session: WebSessionDoc, post: string, content: string, reactionType: string) {
     const user = WebSession.getUser(session);
-    const numVotes = (reactionType=="comment") ? 0 : 1;
     const postId = new ObjectId(post);
-    console.log(postId);
-    return await Reaction.postReaction(content, postId, user, numVotes, reactionType)
+    if (content == null) {
+      throw new NotAllowedError("Reaction must be at least 1 character long!");
+    }
+    if (reactionType!=="comment" && reactionType!=="tag") {
+      throw new NotAllowedError("reactionType's value should be 'comment' or 'tag'");
+    } else if (reactionType==="tag") {
+      const existingReaction = await Reaction.getReactions({post: new ObjectId(post), content, reactionType: "tag"});
+      if (existingReaction.length>0) {
+        throw new NotAllowedError("Tag "+content+" already exists for post "+post+"! Please upvote tag instead.");
+      }
+    }
+    return await Reaction.postReaction(content, postId, user, reactionType)
   }
 
   @Router.delete("/reactions/:_id")
-  async deleteReaction(reaction: string) {
+  async deleteReaction(session: WebSessionDoc, reaction: string) {
+    const user = WebSession.getUser(session);
+    await Reaction.isReacter(user, reaction);
+    const existingReaction = await Reaction.getReactions({_id: new ObjectId(reaction)});
+    if (existingReaction.length==0) {
+      throw new ReactionNotFoundError();
+    } else if (existingReaction[0].reactionType!=="comment") {
+      throw new CantDeleteReactionError();
+    }
+    await Moderation.deleteAllReportsByReaction(reaction);
     return await Reaction.deleteReaction(reaction);
   }
 
   @Router.post("/reactions/upvote")
-  async upvoteTag(reaction: string) {
-    return await Reaction.upvote(reaction);
+  async upvoteTag(session: WebSessionDoc, reaction: string) {
+    const user = WebSession.getUser(session);
+    return await Reaction.upvote(user, reaction);
   }
 
-  @Router.get("/reactions")
+  @Router.get("/reactions/similarPosts")
   async findSimilarPosts(reaction: string) {
     return await Reaction.findSimilarPosts(reaction);
   }
 
-  @Router.post("/map/start_address")
-  async addStartingAddress(startAddress: string, zipCode: string) {
-    // Adds the address of a starting address (of a public location) to map displayed for zipCode
+  @Router.get("/reactions")
+  async getReactions(post?: string) {
+    let reactions;
+    if (post) {
+      const id = new ObjectId(post);
+      reactions = await Reaction.getByPost(id);
+    } else {
+      reactions = await Reaction.getReactions({});
+    }
+    return Responses.reactions(reactions);
   }
 
-  @Router.post("/map/destination_address")
-  async addDestinationAddress(destinationAddress: string, zipCode: string) {
-    // Adds the address of a destination address to map displayed for zipCode
+  @Router.post("/map/addAddress")
+  async addAddress(session: WebSessionDoc, zipCode: string, address: string, addressType: string) {
+    const user = WebSession.getUser(session);
+    ZipCodeMap.checkAddressType(addressType);
+    return await ZipCodeMap.addAddress(user, zipCode, address, addressType);
   }
 
-  @Router.delete("/map/start_address/:id")
-  async removeStartingAddress(startAddress: string) {
-    // Adds the address of a starting address (of a public location)
+  @Router.delete("/map/removeAddress/:id")
+  async removeAddress(session: WebSessionDoc, zipCode: string, address: string, addressType: string) {
+    const user = WebSession.getUser(session);
+    ZipCodeMap.checkAddressType(addressType);
+    return await ZipCodeMap.removeAddress(user, zipCode, address, addressType);
   }
 
-  @Router.delete("/map/destination_address/:id")
-  async removeDestinationAddress(destinationAddress: string, zipCode: string) {
-    // Adds the address of a destination address to map displayed for zipCode
+  @Router.get("/map/nearbyPlaces")
+  async getNearbyPlaces(session: WebSessionDoc, zipCode: string, addressType: string) {
+    WebSession.getUser(session);
+    ZipCodeMap.checkAddressType(addressType);
+    return await ZipCodeMap.getNearbyAddresses(zipCode, addressType);
   }
 
-  @Router.get("/map/starting_address")
-  async getStartingAddress(zipCode: String) {
-    // Gets all the starting addresses associated with zipCode
-  }
-
-  @Router.get("/map/destination_address")
-  async getDestinationAddress(zipCode: String) {
-    // Gets all the destination addresses associated with zipCode
-  }
-
-  @Router.get("/map/findRoute")
-  async findRoute(zipCode: string, startingAddress: string, destinationAddress: string, transportationMode: string) {
+  @Router.get("/map/directions")
+  async findRoute(session: WebSessionDoc, zipCode: string, startingAddress: string, destinationAddress: string, transportationMode: string) {
     // Generate URL to Google Maps showing route from startingAddress to destinationAddress using transportationMode
+    WebSession.getUser(session);
+    return await ZipCodeMap.findRoute(startingAddress, destinationAddress, transportationMode);
   }
 
   @Router.post("/report")
-  async uploadReport(session: WebSessionDoc, post: string, content: string, item: string) {
+  async uploadReport(session: WebSessionDoc, post: string, item: string, itemType: string, reason: string) {
     // called when user submits a report to report item for being inappropriate. post is the post item is under
     // if item is a comment/tag or the post that is reported is item is a post
+    const user = WebSession.getUser(session);
+    if (itemType==="post") {
+      const existingPost = await Post.getPosts({_id: new ObjectId(item)});
+      if (existingPost.length==0) {
+        throw new NotFoundError("Post "+item+" not found!");
+      }
+    } else if (itemType==="reaction") {
+      const existingReaction = await Reaction.getReactions({_id: new ObjectId(item)});
+      if (existingReaction.length==0) {
+        throw new ReactionNotFoundError();
+      }
+    } else {
+      throw new NotAllowedError("itemType should be 'post' or 'reaction'");
+    }
+    const report = await Moderation.report(user.toString(), post, item, itemType, reason);
+    return {msg: report.msg, report: await Responses.report(report.report)}
   }
 
   @Router.post("/voteToRemove") 
-  async voteRemove(session: WebSessionDoc, post: string, item: string) {
+  async voteRemove(session: WebSessionDoc, item: string, itemType: string) {
     // called when a moderator votes to remove an item that was reported to be inappropriate. post 
     // is the post item is under if item is a comment/tag or the post that is reported if item is a post.
+    const user = WebSession.getUser(session);
+    if (itemType!=="post" && itemType!=="reaction") {
+      throw new NotAllowedError("itemType should be 'post' or 'reaction'");
+    }
+    return await Moderation.voteToRemove(user, item, itemType);
+  }
+
+  @Router.post("/addModerator") 
+  async addModerator(session: WebSessionDoc, userToAdd: string) {
+    const user = WebSession.getUser(session);
+    return Moderation.addModerator(user, userToAdd);
+  }
+
+  @Router.post("/removeModerator/:id")
+  async removeModerator(session: WebSessionDoc, userToRemove: string) {
+    const user = WebSession.getUser(session);
+    return Moderation.removeModerator(user, userToRemove);
+  }
+
+  @Router.get("/posts/getRecommendations")
+  async getRecommendations(session: WebSessionDoc) {
+    const liker = WebSession.getUser(session);
+    const favorites = await Favorite.getFavorites({liker, itemType: "post"});
+    let similarPosts: Array<string> = [];
+    for (const favorite of favorites) {
+      const reactions = (await Reaction.getByPost(favorite.likedItem)).slice(0,5);
+      for (const reaction of reactions) {
+        const postsSimilarToFavorite = await Reaction.findSimilarPosts(reaction._id.toString());
+        similarPosts = similarPosts.concat(postsSimilarToFavorite.filter((post) => !similarPosts.includes(post.toString())).map((post) => post.toString()));
+      }
+    }
+    return similarPosts;
   }
 }
 

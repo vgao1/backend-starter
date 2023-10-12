@@ -63,13 +63,26 @@ const operations: operation[] = [
     name: "Create Post",
     endpoint: "/api/posts",
     method: "POST",
-    fields: { content: "input" },
+    fields: { 
+      photoURL: "input", 
+      zipCode: "input",
+      options: {
+        address: "input"
+      }
+    },
   },
   {
     name: "Update Post",
     endpoint: "/api/posts/:id",
     method: "PATCH",
-    fields: { id: "input", update: { content: "input", options: { backgroundColor: "input" } } },
+    fields: { 
+      id: "input", 
+      update: { 
+        photoURL: "input", 
+        zipCode: "input",
+        options: { address: "input" } 
+      } 
+    },
   },
   {
     name: "Delete Post",
@@ -78,24 +91,27 @@ const operations: operation[] = [
     fields: { id: "input" },
   },
   {
-    name: "Favorite Post",
+    name: "Favorite Post/User (itemType: post, user)",
     endpoint: "/api/favorites",
     method: "POST",
-    fields: { post: "input"}
+    fields: { 
+      item: "input",
+      itemType: "input"
+    }
   },
-  { name: "Unfavorite Post",
+  { name: "Unfavorite Post/User",
     endpoint: "/api/favorites/:id",
     method: "DELETE",
     fields: { favorite: "input"}
   },
   {
-    name: "Get Favorites (empty for all)",
+    name: "Get My Favorites",
     endpoint: "/api/favorites",
     method: "GET",
-    fields: { liker: "input" },
+    fields: {},
   },
   {
-    name: "Post Reaction",
+    name: "Post Reaction (reactionType: comment, tag)",
     endpoint: "/api/reactions",
     method: "POST",
     fields: { 
@@ -112,15 +128,98 @@ const operations: operation[] = [
   },
   {
     name: "Find Similar Posts",
-    endpoint: "/api/reactions",
+    endpoint: "/api/reactions/similarPosts",
     method: "GET",
     fields: { reaction: "input"}
+  },
+  {
+    name: "Get Recommendations",
+    endpoint: "/api/posts/getRecommendations",
+    method: "GET",
+    fields: {}
   },
   {
     name: "Upvote",
     endpoint: "/api/reactions/upvote",
     method: "POST",
     fields: { reaction: "input"}
+  },
+  {
+    name: "Get Reactions (empty for all)",
+    endpoint: "/api/reactions/",
+    method: "GET",
+    fields: { post: "input" },
+  },
+  {
+    name:"Report Item (itemType: post, reaction)",
+    endpoint: "/api/report",
+    method: "POST",
+    fields: {
+      post: "input",
+      item: "input",
+      itemType: "input",
+      reason: "input"
+    }
+  },
+  {
+    name: "Add Moderator",
+    endpoint: "/api/addModerator",
+    method: "POST",
+    fields: { userToAdd: "input"}
+  },
+  {
+    name: "Remove Moderator",
+    endpoint: "/api/removeModerator/:id",
+    method: "POST",
+    fields: { userToRemove: "input"}
+  },
+  {
+    name: "Vote to Remove Item (itemType: post, reaction)",
+    endpoint: "/api/voteToRemove",
+    method: "POST",
+    fields: { 
+      item: "input",
+      itemType: "input"
+    }
+  },
+  {
+    name: "Add Address (addressType: startingaddress, destination)",
+    endpoint: "/api/map/addAddress",
+    method: "POST",
+    fields: {
+      zipCode: "input",
+      address: "input",
+      addressType: "input"
+    }
+  },
+  {
+    name: "Remove Address (addressType: startingaddress, destination)",
+    endpoint: "/api/map/removeAddress/:id",
+    method: "DELETE",
+    fields: {
+      zipCode: "input",
+      address: "input",
+      addressType: "input"
+    }
+  },
+  {
+    name: "Get Nearby Places (addressType: startingaddress, destination)",
+    endpoint: "/api/map/nearbyPlaces",
+    method: "GET",
+    fields: {
+      zipCode: "input",
+      addressType: "input"
+    }
+  },
+  {
+    name: "Get Directions (transportationMode: w (walk), b (bike), d (drive), r (public transport))",
+    endpoint: "/api/map/directions",
+    method: "GET",
+    fields: {
+      startingAddress: "input", 
+      destinationAddress: "input", 
+      transportationMode: "input"
+    }
   }
 ];
 
